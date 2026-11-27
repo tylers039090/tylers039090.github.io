@@ -1,0 +1,144 @@
+/* "Night game under the lights" tokens — dark default, light mirrored. */
+:root {
+  --bg: #0a1120;
+  --panel: #121b2e;
+  --ink: #eaf0fa;
+  --mute: #8d9ab4;
+  --line: #243250;
+  --accent: #ffb627;
+  --accent-ink: #ffb627;
+  --live: #ff3b5c;
+  --win: #34d399;
+  --loss: #ff6273;
+  --board: #060b16;
+  --glow-amber: rgba(255, 182, 39, 0.16);
+  --glow-blue: rgba(80, 140, 255, 0.14);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #eef2f9;
+    --panel: #ffffff;
+    --ink: #0d1526;
+    --mute: #56627a;
+    --line: #d8dfeb;
+    --accent: #ffb020;
+    --accent-ink: #a45f00;
+    --live: #e11d48;
+    --win: #0a8f5a;
+    --loss: #d22a40;
+    --glow-amber: rgba(255, 176, 32, 0.18);
+    --glow-blue: rgba(80, 140, 255, 0.12);
+    color-scheme: light;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  min-height: 100dvh;
+  background:
+    radial-gradient(60% 40% at 15% -5%, var(--glow-amber), transparent 70%),
+    radial-gradient(60% 40% at 90% -5%, var(--glow-blue), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+a { color: inherit; }
+
+.display { font-family: var(--font-display), sans-serif; text-transform: uppercase; letter-spacing: 0.02em; font-weight: 800; }
+.mono { font-family: var(--font-mono), ui-monospace, monospace; }
+.mute { color: var(--mute); }
+.small { font-size: 0.8125rem; }
+.win { color: var(--win); }
+.loss { color: var(--loss); }
+.stack { display: grid; gap: 10px; }
+.error { color: var(--loss); margin: 12px 0 0; }
+
+.wrap { max-width: 720px; margin: 0 auto; padding: 12px 16px 48px; }
+
+.btn {
+  min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+}
+.btn:disabled { opacity: 0.6; }
+.btn-accent { background: var(--accent); border-color: var(--accent); color: #1a1200; }
+.btn-ghost { background: transparent; }
+
+input {
+  min-height: 44px; width: 100%; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: 16px; /* no iOS zoom */
+}
+label { font-size: 0.8125rem; color: var(--mute); }
+
+/* Ticket stub: notched edges, dashed perforation. */
+.ticket {
+  position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+}
+.ticket::before, .ticket::after {
+  content: ""; position: absolute; top: 50%; width: 16px; height: 16px; margin-top: -8px;
+  border-radius: 50%; background: var(--bg); border: 1px solid var(--line);
+}
+.ticket::before { left: -9px; clip-path: inset(0 0 0 50%); }
+.ticket::after { right: -9px; clip-path: inset(0 50% 0 0); }
+.perf { border-top: 1px dashed var(--line); margin: 10px -16px; }
+
+/* Login */
+.login { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
+.login-card { width: 100%; max-width: 360px; }
+.login-card h1 { margin: 0 0 16px; font-size: 2.25rem; color: var(--accent-ink); }
+
+/* Header */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.topbar h1 { margin: 0; font-size: 1.75rem; }
+
+/* Scoreboard: stays dark in both themes, faint scanlines, glowing net. */
+.board {
+  background: var(--board); color: #eaf0fa; border-radius: 14px; padding: 14px 16px; margin-bottom: 16px;
+  background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 3px);
+  border: 1px solid #1b2742;
+}
+.board-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.board-cell .k { font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase; color: #8d9ab4; }
+.board-cell .v { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.5rem; }
+.board-net.pos .v { color: #34d399; text-shadow: 0 0 12px rgba(52,211,153,0.6); }
+.board-net.neg .v { color: #ff6273; text-shadow: 0 0 12px rgba(255,98,115,0.6); }
+
+.daynav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.daynav a { min-width: 44px; min-height: 44px; display: grid; place-items: center; text-decoration: none; font-size: 1.25rem; }
+
+.section-title { font-family: var(--font-display), sans-serif; text-transform: uppercase; font-weight: 800; font-size: 1.25rem; margin: 24px 0 8px; }
+
+/* Slate: big amber tip times down the left. */
+.slot { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; margin-bottom: 12px; }
+.slot-time { font-family: var(--font-display), sans-serif; font-weight: 800; font-size: 1.25rem; color: var(--accent-ink); line-height: 1.1; padding-top: 14px; }
+.slot-bets { display: grid; gap: 10px; min-width: 0; }
+
+.bet-pick { font-family: var(--font-display), sans-serif; text-transform: uppercase; font-weight: 800; font-size: 1.25rem; overflow-wrap: anywhere; }
+.bet-game { font-size: 0.875rem; color: var(--mute); overflow-wrap: anywhere; }
+.bet-money { display: flex; flex-wrap: wrap; gap: 4px 16px; font-family: var(--font-mono), monospace; font-size: 0.8125rem; }
+.pill { display: inline-block; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--mute); }
+.pill.live { color: var(--live); border-color: var(--live); }
+.pill.won { color: var(--win); border-color: var(--win); }
+.pill.lost { color: var(--loss); border-color: var(--loss); }
+.score { font-family: var(--font-mono), monospace; font-size: 0.8125rem; margin-top: 6px; }
+
+.futures { display: grid; gap: 10px; }
+.empty { color: var(--mute); padding: 16px 0; }
+
+@media (max-width: 380px) {
+  .slot { grid-template-columns: 52px minmax(0, 1fr); }
+  .board-cell .v { font-size: 1.25rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
