@@ -4,8 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { BET_SELECT, normalizeBet } from "@/lib/queries";
 import { toSport } from "@/lib/leagues";
 import { parsePick } from "@/lib/pick";
-import { winAmount, zonedToIso } from "@/lib/format";
-import type { Bet, BetStatus } from "@/lib/types";
+import { fmtTime, winAmount, zonedToIso } from "@/lib/format";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { linkBet } from "@/lib/live";
+import { espnDates, fetchScoreboard, POLLED, toGameRow, type EspnGame } from "@/lib/scoreboard";
+import type { Bet, BetStatus, Sport } from "@/lib/types";
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -148,8 +151,86 @@ export async function addBet(input: ManualBet): Promise<Result<Bet>> {
         settle_date: input.date,
       });
     }
+    // Link legs to their ESPN games now, so the score shows right away.
+    const admin = createAdminClient();
+    if (admin && !isFuture) await linkBet(admin, row.id).catch(() => 0);
     return { ok: true, data: await loadBet(supabase, row.id) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not save." };
+  }
+}
+
+// ── "Needs game" picker ──────────────────────────────────────────────────
+
+export interface GameChoice {
+  id: string;
+  label: string;
+  when: string;
+  state: string;
+}
+
+async function legContext(legId: string) {
+  const { supabase } = await signedIn();
+  // RLS limits this to the signed-in user's own legs.
+  const { data, error } = await supabase
+    .from("legs")
+    .select("id, bet_id, start_at, bets!inner(sport, date)")
+    .eq("id", legId)
+    .single();
+  if (error || !data) throw new Error("Leg not found.");
+  const bet = data.bets as unknown as { sport: Sport; date: string };
+  const league = POLLED[bet.sport];
+  if (!league) throw new Error(`Live scores aren't available for ${bet.sport}.`);
+  const dates = [...new Set([...espnDates(data.start_at, bet.date), bet.date])];
+  return { supabase, leg: data, league, dates };
+}
+
+async function dayGamesFor(league: string, dates: string[]) {
+  const rs = await Promise.all(dates.map((d) => fetchScoreboard(league, d)));
+  const failed = rs.find((r) => !r.ok);
+  const games = new Map<string, EspnGame>();
+  rs.forEach((r) => r.ok && r.games.forEach((g) => games.set(g.id, g)));
+  return { games: [...games.values()], error: games.size ? null : failed && !failed.ok ? failed.error : null };
+}
+
+/** That day's games in the leg's league, for linking by hand. */
+export async function dayGames(legId: string): Promise<Result<GameChoice[]>> {
+  try {
+    const { league, dates } = await legContext(legId);
+    const { games, error } = await dayGamesFor(league, dates);
+    if (error) return { ok: false, error: "ESPN isn't responding. Try again in a minute." };
+    return {
+      ok: true,
+      data: games
+        .sort((a, z) => (a.startAt ?? "").localeCompare(z.startAt ?? "") || a.away.short.localeCompare(z.away.short))
+        .map((g) => ({
+          id: g.id,
+          label: `${g.away.short} @ ${g.home.short}`,
+          when: g.state === "pre" ? fmtTime(g.startAt) : g.detail,
+          state: g.state,
+        })),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't load games." };
+  }
+}
+
+/** Link a leg to the ESPN game picked from the list. */
+export async function linkLeg(legId: string, gameId: string): Promise<Result<Bet>> {
+  try {
+    const { supabase, leg, league, dates } = await legContext(legId);
+    const admin = createAdminClient();
+    if (!admin) return { ok: false, error: "Server is missing SUPABASE_SERVICE_ROLE_KEY." };
+    const { games } = await dayGamesFor(league, dates);
+    const game = games.find((g) => g.id === gameId);
+    if (!game) return { ok: false, error: "That game isn't on ESPN's list any more." };
+
+    const { error: gErr } = await admin.from("games").upsert({ ...toGameRow(game), updated_at: new Date().toISOString() });
+    if (gErr) return { ok: false, error: gErr.message };
+    const { error } = await supabase.from("legs").update({ game_id: game.id, start_at: game.startAt }).eq("id", legId);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, data: await loadBet(supabase, leg.bet_id) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't link the game." };
   }
 }

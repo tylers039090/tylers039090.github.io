@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_KEY, SUPABASE_URL } from "./env";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+// /api/poll authenticates the cron call itself with CRON_SECRET.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/poll"];
 
 /** Refresh the Supabase session cookie and send signed-out visitors to /login. */
 export async function updateSession(request: NextRequest) {

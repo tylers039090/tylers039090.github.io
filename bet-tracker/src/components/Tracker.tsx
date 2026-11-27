@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteBet, setStatus } from "@/app/actions";
 import { signOut } from "@/app/login/actions";
 import { betNet, fmtDate, fmtTime, shiftYmd, signClass, usd } from "@/lib/format";
-import type { Bet, BetStatus } from "@/lib/types";
+import { BET_SELECT, normalizeBet } from "@/lib/queries";
+import { createClient } from "@/lib/supabase/client";
+import type { Bet, BetStatus, Game, PollState } from "@/lib/types";
 import { AddBetForm } from "./AddBetForm";
 import { FutureCard } from "./FutureCard";
 import { Season } from "./Season";
@@ -26,8 +28,28 @@ function untilLabel(start: string | null, now: number | null) {
   return ms > 36e5 ? `in ${Math.round(ms / 36e5)}h` : `in ${Math.max(1, Math.round(ms / 6e4))}m`;
 }
 
-export function Tracker({ initialBets, today }: { initialBets: Bet[]; today: string }) {
+const upsertBet = (bs: Bet[], b: Bet) => (bs.some((x) => x.id === b.id) ? bs.map((x) => (x.id === b.id ? b : x)) : [...bs, b]);
+
+function ago(ms: number) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+
+export function Tracker({
+  initialBets,
+  initialPoll,
+  today,
+}: {
+  initialBets: Bet[];
+  initialPoll: PollState | null;
+  today: string;
+}) {
   const [bets, setBets] = useState(initialBets);
+  const [poll, setPoll] = useState(initialPoll);
+  const [live, setLive] = useState<"connecting" | "live" | "offline">("connecting");
   const [sel, setSel] = useState(today);
   const [view, setView] = useState<View>("daily");
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -49,6 +71,86 @@ export function Tracker({ initialBets, today }: { initialBets: Bet[]; today: str
     read();
     addEventListener("hashchange", read);
     return () => removeEventListener("hashchange", read);
+  }, []);
+
+  // Realtime: the poller writes games; phones never call ESPN. Scores patch in place.
+  useEffect(() => {
+    const sb = createClient();
+    let alive = true;
+    let channel: ReturnType<typeof sb.channel> | null = null;
+
+    const refetchBet = async (id: string) => {
+      const { data } = await sb.from("bets").select(BET_SELECT).eq("id", id).maybeSingle();
+      if (!alive) return;
+      setBets((bs) => (data ? upsertBet(bs, normalizeBet(data)) : bs.filter((b) => b.id !== id)));
+    };
+    const refetchAll = async () => {
+      const [{ data }, { data: p }] = await Promise.all([
+        sb.from("bets").select(BET_SELECT).order("date"),
+        sb.from("poller_state").select("*").eq("id", 1).maybeSingle(),
+      ]);
+      if (!alive) return;
+      if (data) setBets(data.map(normalizeBet));
+      if (p) setPoll(p as PollState);
+    };
+    const patchGame = (g: Game) =>
+      setBets((bs) =>
+        bs.map((b) => {
+          const touchesLeg = b.legs.some((l) => l.game_id === g.id);
+          const touchesFuture = b.futures_info?.next_game_id === g.id;
+          if (!touchesLeg && !touchesFuture) return b;
+          return {
+            ...b,
+            legs: touchesLeg ? b.legs.map((l) => (l.game_id === g.id ? { ...l, game: g } : l)) : b.legs,
+            futures_info: touchesFuture && b.futures_info ? { ...b.futures_info, next_game: g } : b.futures_info,
+          };
+        }),
+      );
+    const betIdOf = (row: unknown) => (row as { bet_id?: string } | null)?.bet_id;
+
+    (async () => {
+      const { data } = await sb.auth.getSession();
+      if (data.session) sb.realtime.setAuth(data.session.access_token);
+      if (!alive) return;
+      channel = sb
+        .channel("bet-tracker")
+        .on("postgres_changes", { event: "*", schema: "public", table: "games" }, (p) => {
+          if (p.eventType !== "DELETE") patchGame(p.new as Game);
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "legs" }, (p) => {
+          const id = betIdOf(p.new) ?? betIdOf(p.old);
+          if (id) refetchBet(id);
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "futures_info" }, (p) => {
+          const id = betIdOf(p.new) ?? betIdOf(p.old);
+          if (id) refetchBet(id);
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "bets" }, (p) => {
+          if (p.eventType === "DELETE") {
+            const id = (p.old as { id?: string }).id;
+            if (id) setBets((bs) => bs.filter((b) => b.id !== id));
+          } else refetchBet((p.new as { id: string }).id);
+        })
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "poller_state" }, (p) =>
+          setPoll(p.new as PollState),
+        )
+        .subscribe((status) => {
+          if (!alive) return;
+          if (status === "SUBSCRIBED") setLive("live");
+          else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setLive("offline");
+        });
+    })();
+
+    // iOS suspends Home Screen apps; catch up whenever the app comes back.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refetchAll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      alive = false;
+      document.removeEventListener("visibilitychange", onVisible);
+      if (channel) sb.removeChannel(channel);
+    };
   }, []);
 
   const daily = useMemo(() => bets.filter((b) => !b.is_future), [bets]);
@@ -100,8 +202,10 @@ export function Tracker({ initialBets, today }: { initialBets: Bet[]; today: str
     setBets((bs) => bs.filter((b) => b.id !== id));
   }, []);
 
+  const onUpdate = useCallback((b: Bet) => setBets((bs) => upsertBet(bs, b)), []);
+
   const onSaved = (b: Bet) => {
-    setBets((bs) => [...bs, b]);
+    setBets((bs) => upsertBet(bs, b));
     if (b.is_future) location.hash = "#futures";
     else setSel(b.date);
   };
@@ -115,14 +219,19 @@ export function Tracker({ initialBets, today }: { initialBets: Bet[]; today: str
         </form>
       </header>
 
-      <nav className="tabs" aria-label="View">
-        <a href="#daily" className={view === "daily" ? "on" : ""} aria-current={view === "daily" ? "page" : undefined}>
-          Daily
-        </a>
-        <a href="#futures" className={view === "futures" ? "on" : ""} aria-current={view === "futures" ? "page" : undefined}>
-          Futures {openFutures.length > 0 && <span>{openFutures.length}</span>}
-        </a>
-      </nav>
+      <div className="tabs-row">
+        <nav className="tabs" aria-label="View">
+          <a href="#daily" className={view === "daily" ? "on" : ""} aria-current={view === "daily" ? "page" : undefined}>
+            Daily
+          </a>
+          <a href="#futures" className={view === "futures" ? "on" : ""} aria-current={view === "futures" ? "page" : undefined}>
+            Futures {openFutures.length > 0 && <span>{openFutures.length}</span>}
+          </a>
+        </nav>
+        <span className={`sync ${live}`} role="status">
+          {live === "live" ? "Live" : live === "offline" ? "Offline" : "Connecting…"}
+        </span>
+      </div>
 
       {error && (
         <p className="status neg" role="alert">
@@ -143,7 +252,9 @@ export function Tracker({ initialBets, today }: { initialBets: Bet[]; today: str
             flash={flash}
             onSet={onSet}
             onDelete={onDelete}
+            onUpdate={onUpdate}
           />
+          <ScoreAge poll={poll} now={now} anyLive={daily.some((b) => b.date === sel && b.legs.some((l) => l.game?.state === "in"))} />
         </>
       ) : (
         <>
@@ -284,6 +395,7 @@ function Slate({
   flash,
   onSet,
   onDelete,
+  onUpdate,
 }: {
   bets: Bet[];
   sel: string;
@@ -293,6 +405,7 @@ function Slate({
   flash: Record<string, "won" | "lost">;
   onSet: (id: string, s: BetStatus) => void;
   onDelete: (id: string) => void;
+  onUpdate: (b: Bet) => void;
 }) {
   const groups: { key: string; start: string | null; items: Bet[] }[] = [];
   bets
@@ -326,6 +439,7 @@ function Slate({
                   flash={flash[b.id]}
                   onSet={(s) => onSet(b.id, s)}
                   onDelete={() => onDelete(b.id)}
+                  onUpdate={onUpdate}
                 />
               ))}
             </div>
@@ -334,4 +448,23 @@ function Slate({
       )}
     </section>
   );
+}
+
+/** Fail soft: say how old the scores are, and when ESPN or the poller is down. */
+function ScoreAge({ poll, now, anyLive }: { poll: PollState | null; now: number | null; anyLive: boolean }) {
+  if (now == null) return null;
+  if (!poll?.last_success) {
+    return <p className="note">Live scores appear once the score poller has run.</p>;
+  }
+  const age = now - Date.parse(poll.last_success);
+  const failing = !!poll.last_error_at && Date.parse(poll.last_error_at) > Date.parse(poll.last_success);
+  const stale = anyLive && age > 2 * 60_000;
+  if (failing || stale) {
+    return (
+      <p className="note neg" role="status">
+        {failing ? "ESPN isn't responding" : "Scores are behind"} — showing scores from {ago(age)}.
+      </p>
+    );
+  }
+  return <p className="note">Scores checked {ago(now - Date.parse(poll.last_run ?? poll.last_success))}.</p>;
 }

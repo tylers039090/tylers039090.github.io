@@ -4,7 +4,7 @@ import { betNet, fmtOdds, signClass, usd } from "@/lib/format";
 import { espnUrl } from "@/lib/espn";
 import type { Bet, BetStatus, Leg } from "@/lib/types";
 import { Controls } from "./Controls";
-import { EspnLink, Score } from "./Score";
+import { EspnLink, GamePicker, needsGame, Score } from "./Score";
 
 export const gameLabel = (l: Leg) => (l.away && l.home ? `${l.away} @ ${l.home}` : "");
 
@@ -46,12 +46,14 @@ export function Ticket({
   flash,
   onSet,
   onDelete,
+  onUpdate,
 }: {
   bet: Bet;
   busy: boolean;
   flash?: "won" | "lost" | null;
   onSet: (s: BetStatus) => void;
   onDelete: () => void;
+  onUpdate: (b: Bet) => void;
 }) {
   const single = bet.type !== "parlay";
   const leg = bet.legs[0];
@@ -73,7 +75,8 @@ export function Ticket({
 
       {single && leg ? (
         <>
-          <Score game={leg.game} />
+          <Score game={leg.game} leg={leg} />
+          {needsGame(bet, leg) && <GamePicker leg={leg} onLinked={onUpdate} />}
           {open && <EspnLink href={espnUrl(bet, leg, leg.game)} />}
         </>
       ) : (
@@ -88,7 +91,8 @@ export function Ticket({
                   {gameLabel(l)}
                   {l.odds ? ` · ${fmtOdds(l.odds)}` : ""}
                 </span>
-                <Score game={l.game} />
+                <Score game={l.game} leg={l} />
+                {needsGame(bet, l) && <GamePicker leg={l} onLinked={onUpdate} />}
                 {open && <EspnLink href={espnUrl(bet, l, l.game)} />}
               </span>
             </li>

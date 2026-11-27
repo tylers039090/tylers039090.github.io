@@ -9,6 +9,8 @@ export interface Game {
   home: string | null;
   away_abbr: string | null;
   home_abbr: string | null;
+  away_short?: string | null;
+  home_short?: string | null;
   away_score: number | null;
   home_score: number | null;
   state: "pre" | "in" | "post" | null;
@@ -74,4 +76,13 @@ export interface Bet {
   created_at: string;
   legs: Leg[];
   futures_info?: FuturesInfo | null;
+}
+
+export interface PollState {
+  last_run: string | null;
+  last_success: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  hot: boolean;
+  tracked: number;
 }
