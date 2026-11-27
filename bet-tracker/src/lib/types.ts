@@ -53,6 +53,7 @@ export interface FuturesInfo {
   settle_event: string | null;
   outlook: string | null;
   updated_at: string | null;
+  next_game?: Game | null;
 }
 
 export interface Bet {

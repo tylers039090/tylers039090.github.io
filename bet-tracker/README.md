@@ -2,7 +2,12 @@
 
 Phone-first web app for tracking Bovada bets with live scores. Next.js (App Router) on Vercel, Supabase for the database, sign-in and realtime.
 
-**Status: milestone 1 — skeleton and data.** Schema with row-level security, email sign-in (magic link or 6-digit code), importer for the Claude artifact's export, and a basic slate + futures view to prove the data flows. Milestone 2 ports the full artifact screens.
+**Status: milestone 2 — daily slate and futures.**
+
+- M1: schema with row-level security, email sign-in (magic link or 6-digit code), importer for the Claude artifact's export.
+- M2: the artifact's screens in React — Daily/Futures switch, date strip (10 days back, 4 ahead), dark scoreboard with day P&L, ticket stubs grouped by tip time, futures cards (record, ranking, odds taken vs now, next game, settle date), season stats (net, record, win rate, ROI, last-14-days bars, net by sport), manual add form (singles, parlays, futures; dedupe by ticket), and Won/Lost/Push controls (tap again to undo) with two-tap delete.
+
+Next: milestone 3 (ESPN poller, live scores via Realtime, cover line).
 
 ## One-time setup
 
@@ -60,7 +65,10 @@ npm run dev     # http://localhost:3000
 | `src/proxy.ts`, `src/lib/supabase/` | Session refresh + redirect to `/login`; browser/server clients |
 | `src/app/login/` | Email → link or code sign-in (server actions) |
 | `src/app/auth/confirm/` | Magic-link landing route |
-| `src/app/page.tsx` | Day view (scoreboard, slate by tip time) and open futures |
+| `src/app/page.tsx` | Loads the signed-in user's bets and hands them to `Tracker` |
+| `src/app/actions.ts` | Server actions: set status / undo, delete, add a manual bet |
+| `src/components/` | `Tracker` (tabs, date strip, boards, slate), `Ticket`, `FutureCard`, `Season`, `AddBetForm` |
+| `src/lib/espn.ts` | "Live on ESPN" links (game page once the poller stores it, else that day's scoreboard) |
 | `src/lib/pick.ts` | Parses picks into side + line for grading (`"Gonzaga -3.5"` → Gonzaga, −3.5) |
 | `scripts/import-export.ts` | Artifact export → Supabase importer |
 
